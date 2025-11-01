@@ -1,0 +1,3 @@
+/home/dam900/studia/drugi_stopien/ziwpp/build/CMakeFiles/basic_app.dir
+/home/dam900/studia/drugi_stopien/ziwpp/build/CMakeFiles/edit_cache.dir
+/home/dam900/studia/drugi_stopien/ziwpp/build/CMakeFiles/rebuild_cache.dir
