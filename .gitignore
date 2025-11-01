@@ -56,3 +56,6 @@ cmake-build-*/
 
 # macOS
 .DS_Store
+
+# data for algorithm
+data/
