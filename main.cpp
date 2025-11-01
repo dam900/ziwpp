@@ -1,5 +1,8 @@
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -12,6 +15,125 @@ using DueDates = std::vector<int>;
 using SetupTimes = std::vector<std::vector<int>>;
 
 using ProblemInstance = std::tuple<ProcessTimes, Weights, DueDates, SetupTimes>;
+
+ProblemInstance readInstance(const std::string& filePath);
+
+struct Solution {
+    std::vector<int> schedule;
+    long long objectiveValue = std::numeric_limits<long long>::max();
+};
+
+Solution simulatedAnnealing(const ProblemInstance& instance, int maxIterations, double initialTemp, double coolingRate);
+
+int main() {
+    std::string basePath = "/home/dam900/studia/drugi_stopien/ziwpp/data/scheduling-benchmarks/wtsds/";  // change according to directory
+    std::string instanceName = "wt_sds_1.instance";                                                      // change according to directory
+
+    std::string instancePath = basePath + instanceName;
+
+    ProblemInstance instance = readInstance(instancePath);
+
+    Solution bestSolution = simulatedAnnealing(instance, 100000, 1000.0, 0.995);
+    std::cout << "Best TWT found: " << bestSolution.objectiveValue << std::endl;
+
+    return 0;
+}
+
+long long calculateTWT(
+    const std::vector<int>& schedule,
+    const ProcessTimes& p,
+    const Weights& w,
+    const DueDates& d,
+    const SetupTimes& s) {
+    long long totalWeightedTardiness = 0;
+    long long completionTime = 0;
+
+    int prevJobId = -1;
+
+    for (const int& jobId : schedule) {
+        int setup = s[prevJobId + 1][jobId];
+
+        completionTime += setup + p[jobId];
+        long long tardiness = std::max(0LL, completionTime - d[jobId]);
+        totalWeightedTardiness += (long long)w[jobId] * tardiness;
+        prevJobId = jobId;
+    }
+
+    return totalWeightedTardiness;
+}
+
+std::vector<int> generateInitialSolution(int n, const DueDates& d) {
+    std::vector<int> schedule(n);
+    std::iota(schedule.begin(), schedule.end(), 0);
+
+    std::sort(schedule.begin(), schedule.end(), [&](int a, int b) {
+        return d[a] < d[b];
+    });
+
+    return schedule;
+}
+
+Solution simulatedAnnealing(const ProblemInstance& instance, int maxIterations, double initialTemp, double coolingRate) {
+    ProcessTimes p = std::get<0>(instance);
+    Weights w = std::get<1>(instance);
+    DueDates d = std::get<2>(instance);
+    SetupTimes s = std::get<3>(instance);
+
+    int n = p.size();
+    if (n == 0) return Solution();
+
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_int_distribution<int> index_dist(0, n - 1);
+    std::uniform_real_distribution<double> rand_01(0.0, 1.0);
+
+    Solution currentSolution;
+    currentSolution.schedule = generateInitialSolution(n, d);
+    currentSolution.objectiveValue = calculateTWT(currentSolution.schedule, p, w, d, s);
+
+    Solution bestSolution = currentSolution;
+
+    std::cout << "Initial TWT (EDD): " << bestSolution.objectiveValue << std::endl;
+
+    double currentTemp = initialTemp;
+
+    for (int i = 0; i < maxIterations; ++i) {
+        Solution neighborSolution = currentSolution;
+
+        int idx1 = index_dist(rng);
+        int idx2 = index_dist(rng);
+        if (n > 1) {
+            while (idx1 == idx2) {
+                idx2 = index_dist(rng);
+            }
+        }
+
+        std::swap(neighborSolution.schedule[idx1], neighborSolution.schedule[idx2]);
+
+        neighborSolution.objectiveValue = calculateTWT(neighborSolution.schedule, p, w, d, s);
+
+        long long deltaCost = neighborSolution.objectiveValue - currentSolution.objectiveValue;
+
+        if (deltaCost < 0) {
+            currentSolution = neighborSolution;
+        } else {
+            double acceptanceProb = std::exp(-(double)deltaCost / currentTemp);
+            if (rand_01(rng) < acceptanceProb) {
+                currentSolution = neighborSolution;
+            }
+        }
+
+        if (currentSolution.objectiveValue < bestSolution.objectiveValue) {
+            bestSolution = currentSolution;
+        }
+
+        currentTemp *= coolingRate;
+    }
+
+    std::cout << "Final TWT (SA): " << bestSolution.objectiveValue << std::endl;
+
+    return bestSolution;
+}
 
 ProblemInstance readInstance(const std::string& filePath) {
     std::cout << "Reading instance from: " << filePath << std::endl;
@@ -109,24 +231,4 @@ ProblemInstance readInstance(const std::string& filePath) {
 
     std::cout << "Finished reading instance." << std::endl;
     return std::make_tuple(pTimes, weights, dueDates, setupTimes);
-}
-
-int main() {
-    std::string basePath = "/home/dam900/studia/drugi_stopien/ziwpp/data/scheduling-benchmarks/wtsds/";  // change according to directory
-    std::string instanceName = "wt_sds_1.instance";                                                      // change according to directory
-
-    std::string instancePath = basePath + instanceName;
-
-    ProblemInstance instance = readInstance(instancePath);
-
-    ProcessTimes p = std::get<0>(instance);
-    Weights w = std::get<1>(instance);
-    DueDates d = std::get<2>(instance);
-    SetupTimes s = std::get<3>(instance);
-    std::cout << "Process Times: ";
-    for (const auto& pt : p) {
-        std::cout << pt << " ";
-    }
-
-    return 0;
 }
