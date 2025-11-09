@@ -8,6 +8,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <numeric>
 
 using ProcessTimes = std::vector<int>;
 using Weights = std::vector<int>;
@@ -24,10 +25,11 @@ struct Solution {
 };
 
 Solution simulatedAnnealing(const ProblemInstance& instance, int maxIterations, double initialTemp, double coolingRate);
+Solution TWT_Insertion_Heuristic(const ProblemInstance& instance);
 
 int main() {
-    std::string basePath = "/home/dam900/studia/drugi_stopien/ziwpp/data/scheduling-benchmarks/wtsds/";  // change according to directory
-    std::string instanceName = "wt_sds_1.instance";                                                      // change according to directory
+    std::string basePath = ".././data/scheduling-benchmarks/wtsds/";  
+    std::string instanceName = "wt_sds_1.instance";  
 
     std::string instancePath = basePath + instanceName;
 
@@ -35,6 +37,9 @@ int main() {
 
     Solution bestSolution = simulatedAnnealing(instance, 100000, 1000.0, 0.995);
     std::cout << "Best TWT found: " << bestSolution.objectiveValue << std::endl;
+
+    Solution insertionSolution = TWT_Insertion_Heuristic(instance);
+    std::cout << "Insertion Heuristic TWT: " << insertionSolution.objectiveValue << std::endl;
 
     return 0;
 }
@@ -133,6 +138,61 @@ Solution simulatedAnnealing(const ProblemInstance& instance, int maxIterations, 
     std::cout << "Final TWT (SA): " << bestSolution.objectiveValue << std::endl;
 
     return bestSolution;
+}
+
+Solution TWT_Insertion_Heuristic(const ProblemInstance& instance) {
+    ProcessTimes p = std::get<0>(instance);
+    Weights w = std::get<1>(instance);
+    DueDates d = std::get<2>(instance);
+    SetupTimes s = std::get<3>(instance);
+    
+    int n = p.size();
+    if (n == 0) return Solution();
+
+    std::vector<int> job_indices(n);
+    std::iota(job_indices.begin(), job_indices.end(), 0);
+
+    std::sort(job_indices.begin(), job_indices.end(), [&](int a, int b) {
+        if (w[b] == 0 && w[a] != 0) return true;  
+        if (w[a] == 0 && w[b] != 0) return false; 
+        if (w[a] == 0 && w[b] == 0) return a < b; 
+
+        return (double)p[a] / w[a] < (double)p[b] / w[b];
+    });
+
+    std::vector<int> currentSchedule;
+    
+    currentSchedule.push_back(job_indices[0]);
+
+    for (int k = 1; k < n; ++k) {
+        int jobToInsert = job_indices[k];
+        
+        long long bestTWT = std::numeric_limits<long long>::max();
+        int bestPosition = -1;
+
+        for (int j = 0; j <= currentSchedule.size(); ++j) {
+            std::vector<int> tempSchedule = currentSchedule;
+            
+            tempSchedule.insert(tempSchedule.begin() + j, jobToInsert);
+
+            long long tempTWT = calculateTWT(tempSchedule, p, w, d, s);
+
+            if (tempTWT < bestTWT) {
+                bestTWT = tempTWT;
+                bestPosition = j;
+            }
+        }
+        
+        currentSchedule.insert(currentSchedule.begin() + bestPosition, jobToInsert);
+    }
+    
+    Solution result;
+    result.schedule = currentSchedule;
+    result.objectiveValue = calculateTWT(result.schedule, p, w, d, s);
+    
+    std::cout << "Final TWT (TWT-Insertion): " << result.objectiveValue << std::endl;
+
+    return result;
 }
 
 ProblemInstance readInstance(const std::string& filePath) {
