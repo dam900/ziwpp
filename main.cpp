@@ -1,18 +1,55 @@
-#include <cstring>
+#include <endian.h>
 #include <iostream>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <vector>
+
+bool recv_all(int socket, char *buffer, size_t length) {
+  size_t total_received = 0;
+  while (total_received < length) {
+    ssize_t received =
+        recv(socket, buffer + total_received, length - total_received, 0);
+    if (received <= 0)
+      return false;
+    total_received += received;
+  }
+  return true;
+}
 
 void handle_client(int client) {
-  char buffer[1024] = {0};
-  int bytes_received = recv(client, buffer, sizeof(buffer) - 1, 0);
+  uint64_t file_size = 0;
 
-  if (bytes_received > 0) {
-    buffer[bytes_received] = '\0';
-    std::cout << "Received: " << buffer << std::endl;
-    send(client, buffer, bytes_received, 0);
+  if (!recv_all(client, reinterpret_cast<char *>(&file_size),
+                sizeof(file_size))) {
+    std::cerr << "Failed to receive file size" << std::endl;
+    close(client);
+    return;
   }
+
+  file_size = be64toh(file_size);
+  std::cout << "Allocating " << file_size << " bytes in memory..." << std::endl;
+
+  std::vector<char> memory_buffer;
+  try {
+    memory_buffer.resize(file_size);
+  } catch (const std::bad_alloc &e) {
+    std::cerr << "File too large for available RAM!" << std::endl;
+    close(client);
+    return;
+  }
+
+  if (recv_all(client, memory_buffer.data(), file_size)) {
+    std::cout << "Successfully received " << memory_buffer.size()
+              << " bytes into RAM." << std::endl;
+
+    // --- Process data here ---
+  } else {
+    std::cerr << "Connection lost while receiving data." << std::endl;
+  }
+
+  //   char msg[100] = "Data received successfully";
+  //   send(client, msg, sizeof(msg), 0);
 
   close(client);
 }
