@@ -2,7 +2,7 @@
 
 int main() {
     std::string basePath = ".././data/scheduling-benchmarks/wtsds/";  
-    std::string instanceName = "wt_sds_1.instance";  
+    std::string instanceName = "wt_sds_2.instance";  
 
     std::string instancePath = basePath + instanceName;
 
