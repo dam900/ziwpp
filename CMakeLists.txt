@@ -5,4 +5,6 @@ project(BasicCppProject VERSION 1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+file(GLOB SOURCES "src/*.h" "src/*.cpp")
+
 add_executable(app main.cpp)
