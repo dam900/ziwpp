@@ -2,6 +2,7 @@
 #include <endian.h>
 #include <iostream>
 #include <netinet/in.h>
+#include <string>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
@@ -55,19 +56,21 @@ void handle_client(int client) {
     std::ostringstream oss;
     for (size_t i = 0; i < bestSolution.schedule.size(); ++i) {
       oss << bestSolution.schedule[i];
-      if (i < bestSolution.schedule.size() - 1) {
-        oss << ","; // Only add comma if it's not the last element
-      }
+      oss << ",";
     }
+    oss << bestSolution.objectiveValue;
     std::string csv_data = oss.str();
 
     uint64_t msg_len = htobe64(csv_data.size());
 
     // 3. Send length header
-    // send(client, &msg_len, sizeof(msg_len), 0);
+    send(client, &msg_len, sizeof(msg_len), 0);
 
     // 4. Send the actual string data
     send(client, csv_data.c_str(), csv_data.size(), 0);
+
+    char msg[50] = "DONE";
+    send(client, msg, sizeof(msg), 0);
 
   } else {
     std::cerr << "Connection lost while receiving data." << std::endl;
