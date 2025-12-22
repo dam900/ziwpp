@@ -1,3 +1,4 @@
+#include "src/solver.h"
 #include <endian.h>
 #include <iostream>
 #include <netinet/in.h>
@@ -43,7 +44,31 @@ void handle_client(int client) {
     std::cout << "Successfully received " << memory_buffer.size()
               << " bytes into RAM." << std::endl;
 
+    std::string data_str(memory_buffer.begin(), memory_buffer.end());
+    std::istringstream iss(data_str);
     // --- Process data here ---
+    solver::ProblemInstance instance = solver::readInstance(iss);
+
+    solver::Solution bestSolution =
+        solver::simulatedAnnealing(instance, 100000, 1000.0, 0.995);
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < bestSolution.schedule.size(); ++i) {
+      oss << bestSolution.schedule[i];
+      if (i < bestSolution.schedule.size() - 1) {
+        oss << ","; // Only add comma if it's not the last element
+      }
+    }
+    std::string csv_data = oss.str();
+
+    uint64_t msg_len = htobe64(csv_data.size());
+
+    // 3. Send length header
+    // send(client, &msg_len, sizeof(msg_len), 0);
+
+    // 4. Send the actual string data
+    send(client, csv_data.c_str(), csv_data.size(), 0);
+
   } else {
     std::cerr << "Connection lost while receiving data." << std::endl;
   }
