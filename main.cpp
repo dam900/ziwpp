@@ -50,8 +50,29 @@ void handle_client(int client) {
     // --- Process data here ---
     solver::ProblemInstance instance = solver::readInstance(iss);
 
-    solver::Solution bestSolution =
-        solver::simulatedAnnealing(instance, 100000, 1000.0, 0.995);
+    auto send_intermediate_solution = [&](solver::Solution sol) {
+      std::ostringstream oss;
+      for (size_t i = 0; i < sol.schedule.size(); ++i) {
+        oss << sol.schedule[i];
+        oss << ",";
+      }
+      oss << sol.objectiveValue;
+      std::string csv_data = oss.str();
+
+      uint64_t msg_len = htobe64(csv_data.size());
+
+      std::cout << "Sending intermediate solution: " << sol.objectiveValue
+                << std::endl;
+
+      // 3. Send length header
+      send(client, &msg_len, sizeof(msg_len), 0);
+
+      // 4. Send the actual string data
+      send(client, csv_data.c_str(), csv_data.size(), 0);
+    };
+
+    solver::Solution bestSolution = solver::simulatedAnnealing(
+        instance, 100000, 1000.0, 0.995, send_intermediate_solution);
 
     std::ostringstream oss;
     for (size_t i = 0; i < bestSolution.schedule.size(); ++i) {

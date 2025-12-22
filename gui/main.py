@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
 
 
-# --- WĄTEK KOMUNIKACYJNY ---
+# --- WĄTEK KOMUNIKACYJNY (SOLVER WORKER) ---
 class SolverWorker(QThread):
     log_received = pyqtSignal(str)
     result_ready = pyqtSignal(list, float)
@@ -47,36 +47,50 @@ class SolverWorker(QThread):
                 data_bytes = self.file_content.encode("utf-8")
                 s.sendall(struct.pack(">Q", len(data_bytes)))
                 s.sendall(data_bytes)
-                self.log_received.emit("Instancja wysłana. Czekam na wyniki...")
+                self.log_received.emit("Instancja wysłana. Rozpoczynanie obliczeń...")
 
-                # 2. Odbieranie nagłówka wyniku (8B)
-                header = self.recv_exact(s, 8)
-                if not header:
-                    raise ConnectionError("Nie otrzymano nagłówka odpowiedzi.")
+                last_sequence = []
+                last_objective = 0.0
 
-                msg_len = struct.unpack(">Q", header)[0]
-                result_bytes = self.recv_exact(s, msg_len)
-                if not result_bytes:
-                    raise ConnectionError("Nie otrzymano treści wyniku.")
+                # 2. Pętla odbierania wiadomości (pośrednie wyniki + wynik końcowy)
+                while True:
+                    # Odbieramy 8 bajtów - to może być nagłówek rozmiaru LUB początek "DONE"
+                    header = self.recv_exact(s, 8)
+                    if not header:
+                        break
 
-                result_str = result_bytes.decode("utf-8").strip()
+                    # Obsługa sygnału DONE (Serwer wysyła char[50])
+                    if b"DONE" in header:
+                        # Doczytujemy pozostałe 42 bajty bufora DONE, aby wyczyścić socket
+                        self.recv_exact(s, 42)
+                        self.log_received.emit("--- ALGORYTM ZAKOŃCZONY (DONE) ---")
+                        break
 
-                # 3. Odbieranie 50-bajtowego bufora DONE (czyszczenie socketu)
-                done_buffer = self.recv_exact(s, 50)
-                if done_buffer and b"DONE" in done_buffer:
-                    self.log_received.emit("Serwer zakończył obliczenia (DONE).")
+                    # Jeśli to nie DONE, interpretujemy jako rozmiar (uint64_t)
+                    msg_len = struct.unpack(">Q", header)[0]
+                    body_bytes = self.recv_exact(s, msg_len)
+                    if not body_bytes:
+                        break
 
-                # 4. Parsowanie CSV
-                parts = [p.strip() for p in result_str.split(",") if p.strip()]
-                if len(parts) >= 2:
-                    objective = float(parts[-1])
-                    sequence = [int(x) for x in parts[:-1]]
-                    self.result_ready.emit(sequence, objective)
-                else:
-                    self.error_occurred.emit("Nieprawidłowy format danych z serwera.")
+                    body = body_bytes.decode("utf-8").strip()
+
+                    # Parsowanie danych CSV (zad1,zad2,...,objective)
+                    parts = [p.strip() for p in body.split(",") if p.strip()]
+                    if len(parts) >= 2:
+                        last_objective = float(parts[-1])
+                        last_sequence = [int(x) for x in parts[:-1]]
+
+                        # Wyświetlamy informację w logach zamiast przerysowywać wykres
+                        self.log_received.emit(
+                            f"[Aktualizacja] Znaleziono TWT: {last_objective}"
+                        )
+
+                # 3. Po zakończeniu pętli (po odebraniu DONE), rysujemy ostatni najlepszy wynik
+                if last_sequence:
+                    self.result_ready.emit(last_sequence, last_objective)
 
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            self.error_occurred.emit(f"Błąd: {str(e)}")
         finally:
             self.finished_signal.emit()
 
@@ -128,7 +142,7 @@ class GanttCanvas(FigureCanvas):
                     linewidth=0.5,
                 )
 
-                # Etykieta J{id} - umieszczona nad paskiem
+                # Etykieta J{id} nad paskiem
                 self.ax.text(
                     current_time + duration / 2,
                     y_pos + bar_height + 0.5,
@@ -142,12 +156,11 @@ class GanttCanvas(FigureCanvas):
                 current_time += duration
                 prev_job = job
 
-        # --- KLUCZOWE POPRAWKI PRZECIW NACHODZENIU ---
-        self.ax.set_ylim(0, 30)  # Zwiększenie zakresu Y (paski są na wysokości 10-18)
+        # Marginesy dla etykiet, aby nie nachodziły na tytuł
+        self.ax.set_ylim(0, 32)
         self.ax.set_title(
-            "Harmonogram Zadań (Gantt)", pad=30, fontsize=14, fontweight="bold"
+            "Ostateczny Harmonogram (Gantt)", pad=30, fontsize=14, fontweight="bold"
         )
-
         self.ax.set_xlabel("Czas [jednostki]")
         self.ax.set_yticks([])
         self.ax.grid(True, axis="x", linestyle=":", alpha=0.6)
@@ -155,11 +168,11 @@ class GanttCanvas(FigureCanvas):
         self.draw()
 
 
-# --- GŁÓWNE OKNO ---
+# --- GŁÓWNE OKNO (Twoje ulubione UI) ---
 class SolverApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Weighted Tardiness Solver - Client")
+        self.setWindowTitle("TWT Solver Client")
         self.resize(1300, 800)
         self.file_content = ""
         self.process_times = []
@@ -171,22 +184,20 @@ class SolverApp(QMainWindow):
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
 
-        # Panel Górny
+        # Panel Górny sterowania
         top_panel = QFrame()
         top_panel.setFrameShape(QFrame.StyledPanel)
         top_layout = QHBoxLayout(top_panel)
 
-        self.btn_load = QPushButton("1. Wczytaj Plik Instancji")
+        self.btn_load = QPushButton("1. Wczytaj Instancję")
         self.btn_load.clicked.connect(self.load_file)
 
         self.host_input = QLineEdit("127.0.0.1")
         self.port_input = QLineEdit("8080")
-        self.btn_solve = QPushButton("2. Wyślij i Rozwiąż")
+        self.btn_solve = QPushButton("2. Uruchom Solver")
         self.btn_solve.setEnabled(False)
         self.btn_solve.clicked.connect(self.start_solving)
-        self.btn_solve.setStyleSheet(
-            "background-color: #d4edda; font-weight: bold; height: 30px;"
-        )
+        self.btn_solve.setStyleSheet("background-color: #d4edda; font-weight: bold;")
 
         top_layout.addWidget(self.btn_load)
         top_layout.addStretch()
@@ -197,7 +208,7 @@ class SolverApp(QMainWindow):
         top_layout.addWidget(self.btn_solve)
         layout.addWidget(top_panel)
 
-        # Panel Środkowy (Wykres + Logi)
+        # Panel Środkowy (Wykres po lewej, Logi po prawej)
         mid_layout = QHBoxLayout()
 
         # Wykres
@@ -215,15 +226,15 @@ class SolverApp(QMainWindow):
         plot_box.addWidget(self.obj_label)
         mid_layout.addLayout(plot_box, stretch=3)
 
-        # Logi
+        # Logi (Konsola)
         log_box = QVBoxLayout()
-        log_box.addWidget(QLabel("Konsola Serwera:"))
+        log_box.addWidget(QLabel("Przebieg optymalizacji:"))
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
         self.log_display.setStyleSheet(
-            "background-color: #1e1e1e; color: #00ff00; font-family: 'Consolas';"
+            "background-color: #1e1e1e; color: #00ff00; font-family: 'Consolas'; font-size: 10pt;"
         )
-        self.log_display.setFixedWidth(300)
+        self.log_display.setFixedWidth(350)
         log_box.addWidget(self.log_display)
         mid_layout.addLayout(log_box, stretch=1)
 
@@ -231,13 +242,13 @@ class SolverApp(QMainWindow):
 
     def load_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Wybierz instancję", "", "Instance Files (*.instance)"
+            self, "Wybierz plik", "", "Instance (*.instance)"
         )
         if path:
             with open(path, "r") as f:
                 self.file_content = f.read()
             if self.parse_instance(self.file_content):
-                self.log_display.append(f"Wczytano instancję: {path.split('/')[-1]}")
+                self.log_display.append(f"Wczytano: {path.split('/')[-1]}")
                 self.btn_solve.setEnabled(True)
 
     def parse_instance(self, content):
@@ -263,16 +274,17 @@ class SolverApp(QMainWindow):
             self.host_input.text(), int(self.port_input.text()), self.file_content
         )
         self.worker.log_received.connect(lambda m: self.log_display.append(m))
-        self.worker.result_ready.connect(self.handle_result)
+        self.worker.result_ready.connect(self.handle_final_result)
         self.worker.error_occurred.connect(
-            lambda e: QMessageBox.critical(self, "Błąd Komunikacji", e)
+            lambda e: QMessageBox.critical(self, "Błąd", e)
         )
         self.worker.finished_signal.connect(lambda: self.btn_solve.setEnabled(True))
         self.worker.start()
 
     @pyqtSlot(list, float)
-    def handle_result(self, sequence, objective):
-        self.obj_label.setText(f"Objective Value (TWT): {objective}")
+    def handle_final_result(self, sequence, objective):
+        # Ta funkcja wywoła się RAZ po odebraniu DONE
+        self.obj_label.setText(f"Final TWT: {objective}")
         self.canvas.plot_gantt(sequence, self.process_times, self.setup_times)
 
 

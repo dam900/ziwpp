@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -58,7 +59,8 @@ std::vector<int> generateInitialSolution(int n, const DueDates &d) {
 }
 
 Solution simulatedAnnealing(const ProblemInstance &instance, int maxIterations,
-                            double initialTemp, double coolingRate) {
+                            double initialTemp, double coolingRate,
+                            std::function<void(Solution)> callback = nullptr) {
   ProcessTimes p = std::get<0>(instance);
   Weights w = std::get<1>(instance);
   DueDates d = std::get<2>(instance);
@@ -115,10 +117,13 @@ Solution simulatedAnnealing(const ProblemInstance &instance, int maxIterations,
 
     if (currentSolution.objectiveValue < bestSolution.objectiveValue) {
       bestSolution = currentSolution;
+      if (callback) {
+        callback(bestSolution);
+      }
     }
-
-    currentTemp *= coolingRate;
   }
+
+  currentTemp *= coolingRate;
 
   std::cout << "Final TWT (SA): " << bestSolution.objectiveValue << std::endl;
 
