@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QFrame,
 )
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
+from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, Qt, QProcess
 
 
 # --- WĄTEK KOMUNIKACYJNY (SOLVER WORKER) ---
@@ -179,6 +179,18 @@ class SolverApp(QMainWindow):
         self.setup_times = {}
         self.init_ui()
 
+        self.server_process = QProcess(self)
+
+        # Define the path to your executable
+        # Ensure this points to the actual binary file
+        executable_path = "/home/dam900/studia/drugi_stopien/ziwpp/build/app"
+
+        # Start the process
+        self.server_process.start(executable_path)
+
+        # Optional: Handle errors
+        self.server_process.errorOccurred.connect(self.handle_error)
+
     def init_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -287,8 +299,19 @@ class SolverApp(QMainWindow):
         self.obj_label.setText(f"Final TWT: {objective}")
         self.canvas.plot_gantt(sequence, self.process_times, self.setup_times)
 
+    def handle_error(self, error):
+        print(f"Process error: {error}")
+
+    def closeEvent(self, event):
+        # Ensure the server shuts down when the GUI closes
+        self.server_process.terminate()
+        self.server_process.waitForFinished()
+        event.accept()
+
 
 if __name__ == "__main__":
+
+    # socket_path = "/home/dam900/studia/drugi_stopien/ziwpp/build/app"
     app = QApplication(sys.argv)
     window = SolverApp()
     window.show()
