@@ -23,7 +23,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, Qt, QProcess
 
 
-# --- WĄTEK KOMUNIKACYJNY (SOLVER WORKER) ---
 class SolverWorker(QThread):
     log_received = pyqtSignal(str)
     result_ready = pyqtSignal(list, float)
@@ -43,7 +42,6 @@ class SolverWorker(QThread):
                 self.log_received.emit(f"Łączenie z {self.host}:{self.port}...")
                 s.connect((self.host, self.port))
 
-                # 1. Wysyłanie instancji
                 data_bytes = self.file_content.encode("utf-8")
                 s.sendall(struct.pack(">Q", len(data_bytes)))
                 s.sendall(data_bytes)
@@ -52,21 +50,16 @@ class SolverWorker(QThread):
                 last_sequence = []
                 last_objective = 0.0
 
-                # 2. Pętla odbierania wiadomości (pośrednie wyniki + wynik końcowy)
                 while True:
-                    # Odbieramy 8 bajtów - to może być nagłówek rozmiaru LUB początek "DONE"
                     header = self.recv_exact(s, 8)
                     if not header:
                         break
 
-                    # Obsługa sygnału DONE (Serwer wysyła char[50])
                     if b"DONE" in header:
-                        # Doczytujemy pozostałe 42 bajty bufora DONE, aby wyczyścić socket
                         self.recv_exact(s, 42)
                         self.log_received.emit("--- ALGORYTM ZAKOŃCZONY (DONE) ---")
                         break
 
-                    # Jeśli to nie DONE, interpretujemy jako rozmiar (uint64_t)
                     msg_len = struct.unpack(">Q", header)[0]
                     body_bytes = self.recv_exact(s, msg_len)
                     if not body_bytes:
@@ -74,18 +67,15 @@ class SolverWorker(QThread):
 
                     body = body_bytes.decode("utf-8").strip()
 
-                    # Parsowanie danych CSV (zad1,zad2,...,objective)
                     parts = [p.strip() for p in body.split(",") if p.strip()]
                     if len(parts) >= 2:
                         last_objective = float(parts[-1])
                         last_sequence = [int(x) for x in parts[:-1]]
 
-                        # Wyświetlamy informację w logach zamiast przerysowywać wykres
                         self.log_received.emit(
                             f"[Aktualizacja] Znaleziono TWT: {last_objective}"
                         )
 
-                # 3. Po zakończeniu pętli (po odebraniu DONE), rysujemy ostatni najlepszy wynik
                 if last_sequence:
                     self.result_ready.emit(last_sequence, last_objective)
 
@@ -104,7 +94,6 @@ class SolverWorker(QThread):
         return data
 
 
-# --- KOMPONENT WYKRESU ---
 class GanttCanvas(FigureCanvas):
     def __init__(self, parent=None):
         self.fig, self.ax = plt.subplots(figsize=(10, 5))
@@ -118,7 +107,6 @@ class GanttCanvas(FigureCanvas):
         cmap = plt.get_cmap("tab20")
 
         for i, job in enumerate(sequence):
-            # Przezbrojenie
             st = setup_times.get((prev_job, job), 0)
             if st > 0:
                 self.ax.broken_barh(
@@ -130,7 +118,6 @@ class GanttCanvas(FigureCanvas):
                 )
                 current_time += st
 
-            # Zadanie
             if job < len(process_times):
                 duration = process_times[job]
                 color = cmap(job % 20)
@@ -142,7 +129,6 @@ class GanttCanvas(FigureCanvas):
                     linewidth=0.5,
                 )
 
-                # Etykieta J{id} nad paskiem
                 self.ax.text(
                     current_time + duration / 2,
                     y_pos + bar_height + 0.5,
@@ -156,7 +142,6 @@ class GanttCanvas(FigureCanvas):
                 current_time += duration
                 prev_job = job
 
-        # Marginesy dla etykiet, aby nie nachodziły na tytuł
         self.ax.set_ylim(0, 32)
         self.ax.set_title(
             "Ostateczny Harmonogram (Gantt)", pad=30, fontsize=14, fontweight="bold"
@@ -168,7 +153,6 @@ class GanttCanvas(FigureCanvas):
         self.draw()
 
 
-# --- GŁÓWNE OKNO (Twoje ulubione UI) ---
 class SolverApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -181,14 +165,10 @@ class SolverApp(QMainWindow):
 
         self.server_process = QProcess(self)
 
-        # Define the path to your executable
-        # Ensure this points to the actual binary file
         executable_path = "/home/dam900/studia/drugi_stopien/ziwpp/build/app"
 
-        # Start the process
         self.server_process.start(executable_path)
 
-        # Optional: Handle errors
         self.server_process.errorOccurred.connect(self.handle_error)
 
     def init_ui(self):
@@ -238,7 +218,6 @@ class SolverApp(QMainWindow):
         plot_box.addWidget(self.obj_label)
         mid_layout.addLayout(plot_box, stretch=3)
 
-        # Logi (Konsola)
         log_box = QVBoxLayout()
         log_box.addWidget(QLabel("Przebieg optymalizacji:"))
         self.log_display = QTextEdit()
@@ -295,7 +274,6 @@ class SolverApp(QMainWindow):
 
     @pyqtSlot(list, float)
     def handle_final_result(self, sequence, objective):
-        # Ta funkcja wywoła się RAZ po odebraniu DONE
         self.obj_label.setText(f"Final TWT: {objective}")
         self.canvas.plot_gantt(sequence, self.process_times, self.setup_times)
 
@@ -303,7 +281,6 @@ class SolverApp(QMainWindow):
         print(f"Process error: {error}")
 
     def closeEvent(self, event):
-        # Ensure the server shuts down when the GUI closes
         self.server_process.terminate()
         self.server_process.waitForFinished()
         event.accept()
@@ -311,7 +288,7 @@ class SolverApp(QMainWindow):
 
 if __name__ == "__main__":
 
-    # socket_path = "/home/dam900/studia/drugi_stopien/ziwpp/build/app"
+    socket_path = "/home/dam900/studia/drugi_stopien/ziwpp/build/app"
     app = QApplication(sys.argv)
     window = SolverApp()
     window.show()
